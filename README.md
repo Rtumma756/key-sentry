@@ -42,13 +42,34 @@ it never fails open.
   the reveal is audit-logged (who/when/which finding — never the key).
 - **Rotate** — admin passphrase required; marks an entry rotated after
   the key has been rotated at the provider.
-- **Audit trail** — append-only log of every store / reveal / rotate.
+- **Remove** — admin passphrase required; permanently deletes an entry
+  (ciphertext included) and audit-logs the removal. Use it to clear
+  demo keys after a trial run. Only active, non-demo entries count
+  toward owner-verified savings (see below).
+- **Audit trail** — append-only log of every store / reveal / rotate /
+  remove.
 
 **Scope boundary (enforced in the UI)** — vault only keys from scans you
 ran yourself (pasted code, or your own repo) so you can rotate them.
 Never vault keys found in other people's public code; the repo-scan store
 button is offered per finding and only on your explicit click. Demo
 TESTFAKE keys are fine to vault for a trial run.
+
+## Potential savings
+
+After a scan, the panel shows the estimated usage-bill savings from
+finding the keys before they could be abused — same model and prices as
+the CLI prototype (see its `results/DISCOVERY_INTELLIGENCE.md`). Two
+figures are shown:
+
+- **Potential (candidate) savings** — all findings, unconfirmed.
+  "Real-looking" only proves a key matches a documented format in real
+  code/config context; liveness and paid billing are unconfirmed.
+- **Owner-verified savings** — the same model run over keys stored in
+  the vault only. The panel fetches the vault list (masked entries,
+  provider only) and counts entries with status `active` — rotated or
+  expired keys don't count, and demo TESTFAKE keys never count. If the
+  vault is unreachable, this side stays $0 with a note saying so.
 
 ## Quickstart
 
