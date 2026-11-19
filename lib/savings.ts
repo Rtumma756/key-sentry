@@ -62,6 +62,63 @@ export const VERIFIED_NOT_AVAILABLE_NOTE =
   "count here as owner-verified savings. Until then this side stays $0; " +
   "the candidate figures above are unconfirmed estimates, not verified losses.";
 
+/**
+ * Live note for the owner-verified side, shown when GET /api/vault
+ * answers (see app/page.tsx). Exact wording shown in the savings panel.
+ */
+export function ownerVerifiedLiveNote(verifiedKeys: number): string {
+  if (verifiedKeys === 0) {
+    return (
+      "Vault is live — no keys stored yet, so owner-verified savings are $0. " +
+      "Store a key you confirmed live and yours in the vault and it counts here."
+    );
+  }
+  return (
+    `Vault is live — ${verifiedKeys} key${verifiedKeys === 1 ? "" : "s"} stored ` +
+    "and counted as owner-verified savings. These are keys the owner confirmed " +
+    "live and theirs; storing a key in the vault is that confirmation."
+  );
+}
+
+/** Minimal shape of a masked vault list entry (GET /api/vault). */
+export interface VaultListEntry {
+  id: string;
+  provider: string;
+  masked: string;
+  status: string;
+  source: string;
+}
+
+/**
+ * Map vault entries to verified findings for estimateSavings().
+ * Only entries count that are:
+ *   - status "active" (rotated/expired keys are no longer live), and
+ *   - not from the demo sample (demo keys are TESTFAKE fixtures — fine to
+ *     vault for a trial run, but they are not real keys and must never
+ *     inflate owner-verified savings).
+ * Only the provider is used by the model (estimateFor counts providers);
+ * value is always "" — no key material ever enters this path.
+ */
+export function vaultEntriesToVerifiedFindings(
+  entries: VaultListEntry[],
+): Finding[] {
+  return entries
+    .filter((e) => e.status === "active" && e.source !== "demo sample")
+    .map((e) => ({
+      id: `vault:${e.id}`,
+      provider: e.provider,
+      credType: "vaulted",
+      severity: "high" as const,
+      via: "regex" as const,
+      maskedKey: e.masked,
+      value: "",
+      source: "vault",
+      lineNumber: 0,
+      contextLine: "",
+      consoleUrl: "",
+    }));
+}
+
 interface ProviderPricing {
   model: string;
   inputPer1m: number;

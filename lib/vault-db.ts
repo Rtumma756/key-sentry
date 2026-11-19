@@ -159,6 +159,19 @@ export async function setVaultEntryStatus(
   return (rowCount ?? 0) > 0;
 }
 
+/**
+ * Permanently remove an entry (admin only, via the delete route).
+ * Returns the provider name for the audit entry, or null when no such
+ * entry exists. The row — ciphertext included — is deleted; nothing
+ * about the key is returned to the caller.
+ */
+export async function deleteVaultEntry(id: string): Promise<string | null> {
+  await ensureVaultTables();
+  const { rows } = await sql`
+    DELETE FROM vault_entries WHERE id = ${id} RETURNING provider`;
+  return rows.length > 0 ? String(rows[0].provider) : null;
+}
+
 export async function insertAudit(
   entryId: string | null,
   action: string,
