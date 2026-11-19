@@ -2,10 +2,53 @@
 
 Paste code, find leaked AI API keys, fix them.
 
-**Everything runs client-side in the browser.** Pasted code and scanned files
-never leave your machine. The only network call the app makes is the optional
-public GitHub repo scan (public GitHub API, unauthenticated). No accounts, no
-server, no secrets.
+**Everything runs client-side in the browser, except the optional
+encrypted vault (see below).** Pasted code and scanned files never leave
+your machine. The only network calls the app makes are the optional
+public GitHub repo scan (public GitHub API, unauthenticated) and a
+finding you explicitly choose to store in the vault.
+
+## Encrypted vault (admin-only unmask)
+
+The vault is where a finding's **unmasked** key lives — encrypted at rest
+in Vercel Postgres (free tier), admin-only to open. Everything else (this
+page, copied reports, the audit log) shows masked keys only. It exists so
+a business scanning its **own** code can keep a leaked key on file long
+enough to rotate it.
+
+**Setup** (free tier only — nothing here costs money):
+
+1. In Vercel: Storage → Create → Postgres (free tier) for this project.
+2. Set two environment variables (Settings → Environment Variables):
+   - `VAULT_ENCRYPTION_KEY` — generate with `openssl rand -base64 32`
+     (base64 of 32 random bytes; AES-256-GCM key).
+   - `VAULT_ADMIN_PASS` — the admin passphrase for reveals/rotates.
+3. Redeploy. Tables (`vault_entries`, `vault_audit`) are created
+   automatically on first use.
+
+Until all three are in place, the vault section shows exactly what is
+missing and every vault route answers `503 Vault is not configured` —
+it never fails open.
+
+**How it works**
+
+- **Store** — a “Store in vault” button on each finding. That click is the
+  explicit consent: it is the only way a full key leaves the browser.
+  The server re-computes the masked value and fingerprint from the key,
+  encrypts it with AES-256-GCM (fresh 12-byte nonce per entry), and stores
+  ciphertext only. Nothing is stored automatically.
+- **List** — masked entries only; needs no passphrase.
+- **Reveal** — admin passphrase required; the full key is shown once and
+  the reveal is audit-logged (who/when/which finding — never the key).
+- **Rotate** — admin passphrase required; marks an entry rotated after
+  the key has been rotated at the provider.
+- **Audit trail** — append-only log of every store / reveal / rotate.
+
+**Scope boundary (enforced in the UI)** — vault only keys from scans you
+ran yourself (pasted code, or your own repo) so you can rotate them.
+Never vault keys found in other people's public code; the repo-scan store
+button is offered per finding and only on your explicit click. Demo
+TESTFAKE keys are fine to vault for a trial run.
 
 ## Quickstart
 
@@ -19,7 +62,7 @@ npm run build   # production build
 
 - **Paste-to-scan** — paste source code, a `.env` file, or a config file and
   scan it in the browser. Findings show provider, credential type, line
-  number, a masked key (first 8 … last 4 — the full key is never shown),
+  number, a masked key (first 4 … rest hidden — the full key is never shown),
   severity, and the context line with the key masked.
 - **Demo mode** — one click loads sample code with planted FAKE keys
   (TESTFAKE markers) plus decoys that must not be flagged. Expected result:
@@ -56,9 +99,12 @@ fallback). Adding a provider is one entry in `lib/detectors.ts`.
 ## Privacy and safety
 
 - No API keys, secrets, or credentials anywhere in the code.
-- No server-side routes handle user code — there are no API routes at all.
+- Scanning is client-side. The only server-side routes are the vault
+  (`/api/vault/*`): they handle a finding only when you explicitly click
+  “Store in vault”, and they store ciphertext only.
 - Keys are masked everywhere: on screen, in copied output, and in reports.
-  A runtime rule: the full credential value is never rendered.
+  A runtime rule: the full credential value is never rendered — except a
+  vault reveal, which shows it once to an admin and audit-logs the reveal.
 - The app never validates keys against provider APIs (no "is this key live"
   check) — that only happens in the CLI prototype with an explicit flag, for
   keys the user owns.
