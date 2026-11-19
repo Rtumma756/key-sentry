@@ -2,7 +2,7 @@
 // Runs entirely in the browser. Findings carry masked keys only — the full
 // credential value is kept in memory for dedup and never rendered.
 
-import { maskKey, maskLine, scanLine, type RawMatch } from "./detectors";
+import { maskKey, maskLine, scanLine, type MaskMode, type RawMatch } from "./detectors";
 
 export interface Finding {
   id: string;
@@ -11,6 +11,11 @@ export interface Finding {
   severity: "high" | "medium";
   via: "regex" | "context" | "entropy";
   maskedKey: string;
+  /** Full credential value — in-memory ONLY, like the CLI's Finding.value.
+   * Never rendered, never serialized into reports. The ONLY place it
+   * leaves the browser is an explicit "Store in vault" click, which
+   * sends it to the server-side encrypted vault (see lib/vault-*). */
+  value: string;
   source: string; // file name or "pasted code"
   lineNumber: number;
   contextLine: string; // line with the key masked
@@ -40,6 +45,7 @@ export function scanText(
   text: string,
   source: string,
   seen: Set<string>,
+  maskMode: MaskMode = "prefix4",
 ): { findings: Finding[]; lines: number; candidates: number; duplicates: number } {
   const lines = text.split("\n");
   const findings: Finding[] = [];
@@ -61,10 +67,11 @@ export function scanText(
         credType: m.credType,
         severity: m.severity,
         via: m.via,
-        maskedKey: maskKey(m.value),
+        maskedKey: maskKey(m.value, maskMode),
+        value: m.value,
         source,
         lineNumber: idx + 1,
-        contextLine: maskLine(line).trim(),
+        contextLine: maskLine(line, maskMode).trim(),
         consoleUrl: m.consoleUrl,
       });
     }
@@ -78,6 +85,7 @@ const SEVERITY_ORDER: Record<string, number> = { high: 0, medium: 1 };
 /** Scan multiple named sources and build the full result with metrics. */
 export function scanSources(
   sources: Array<{ name: string; text: string }>,
+  maskMode: MaskMode = "prefix4",
 ): ScanResult {
   const started = performance.now();
   const seen = new Set<string>();
@@ -89,7 +97,7 @@ export function scanSources(
 
   for (const s of sources) {
     bytes += new TextEncoder().encode(s.text).length;
-    const r = scanText(s.text, s.name, seen);
+    const r = scanText(s.text, s.name, seen, maskMode);
     all.push(...r.findings);
     lines += r.lines;
     candidates += r.candidates;

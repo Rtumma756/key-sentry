@@ -173,20 +173,27 @@ export function providerNames(): string[] {
   return seen;
 }
 
-/** Mask a credential for display: first 8 chars … last 4. Never the full value. */
-export function maskKey(value: string): string {
-  if (value.length <= 12) return value.slice(0, 2) + "…" + value.slice(-2);
-  return value.slice(0, 8) + "…" + value.slice(-4);
+/** Mask a credential for display. Modes: "prefix4" (default) shows the first 4
+ * chars and hides the rest; "ends" hides the first 5 and last 3 chars and
+ * shows the middle — that exposes most of a key, so use it only for keys the
+ * viewer owns, never for strangers' keys in shared reports. */
+export type MaskMode = "prefix4" | "ends";
+export function maskKey(value: string, mode: MaskMode = "prefix4"): string {
+  if (mode === "ends") {
+    if (value.length <= 8) return "*".repeat(value.length);
+    return "*".repeat(5) + value.slice(5, -3) + "*".repeat(3);
+  }
+  return value.slice(0, 4) + "…";
 }
 
 /** Mask every detected credential inside a line of text. */
-export function maskLine(line: string): string {
+export function maskLine(line: string, mode: MaskMode = "prefix4"): string {
   const matches = scanLine(line);
   if (matches.length === 0) return line;
   let out = "";
   let cursor = 0;
   for (const m of [...matches].sort((a, b) => a.start - b.start)) {
-    out += line.slice(cursor, m.start) + maskKey(m.value);
+    out += line.slice(cursor, m.start) + maskKey(m.value, mode);
     cursor = m.end;
   }
   out += line.slice(cursor);
