@@ -11,6 +11,7 @@ import {
   formatUsd,
   INCIDENT_RESPONSE_PER_KEY_USD,
   SAVINGS_METHODOLOGY_NOTE,
+  VERIFIED_NOT_AVAILABLE_NOTE,
 } from "@/lib/savings";
 
 const FEEDBACK_URL = "https://github.com/Rtumma756/key-sentry/issues";
@@ -43,8 +44,13 @@ function ProviderBreakdown({ data }: { data: Record<string, number> }) {
 }
 
 function SavingsPanel({ findings }: { findings: Finding[] }) {
+  // Wiring point: once the vault is deployed, pass the vaulted findings
+  // (GET /api/vault, provider + masked only) as the second argument so
+  // the owner-verified side counts keys the owner confirmed live.
+  // Until then verifiedFindings defaults to [] and that side is $0.
   const savings = useMemo(() => estimateSavings(findings), [findings]);
   const h = savings.headlineRangeUsd;
+  const vh = savings.ownerVerified.headlineRangeUsd;
   const expected = savings.scenarios.expected;
   const byProvider = Object.entries(expected.byProviderUsd).sort(
     (a, b) => b[1] - a[1],
@@ -52,6 +58,12 @@ function SavingsPanel({ findings }: { findings: Finding[] }) {
   return (
     <section className="savings-panel" aria-label="Potential savings">
       <h2>Potential savings</h2>
+      <p className="savings-sub">
+        <strong>Potential (candidate) savings.</strong> These keys look
+        real (documented format, real code/config context) but were never
+        tested against a provider, so liveness and paid billing are
+        unconfirmed — treat these figures as an upper bound.
+      </p>
       <p className="savings-range">
         <strong>
           {formatUsd(h.conservative)} conservative –{" "}
@@ -102,6 +114,16 @@ function SavingsPanel({ findings }: { findings: Finding[] }) {
           .map(([p, v]) => `${p} (${formatUsd(v)})`)
           .join(" · ")}
       </p>
+      <p className="savings-sub">
+        <strong>Owner-verified savings.</strong>{" "}
+        <strong>
+          {formatUsd(vh.conservative)} conservative –{" "}
+          {formatUsd(vh.expected)} expected – {formatUsd(vh.worstCase)}{" "}
+          worst-case
+        </strong>{" "}
+        ({savings.verifiedKeys} key(s) verified)
+      </p>
+      <p className="muted">{VERIFIED_NOT_AVAILABLE_NOTE}</p>
       <p className="muted">{SAVINGS_METHODOLOGY_NOTE}</p>
       <p className="muted">
         Assumes paid billing on the keys; free-tier keys would cost far less.

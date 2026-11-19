@@ -383,6 +383,62 @@ section .section-sub {
   font-size: 13px;
 }
 
+/* Potential savings panel */
+.savings-panel {
+  margin: 16px 0;
+  padding: 14px 16px;
+  background: var(--ok-bg);
+  border: 1px solid var(--ok-border);
+  border-radius: var(--radius);
+}
+
+.savings-panel h2 {
+  margin-top: 0;
+}
+
+.savings-range {
+  font-size: 17px;
+  margin: 6px 0;
+}
+
+.savings-sub {
+  font-size: 13px;
+  margin: 6px 0 10px;
+}
+
+.savings-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  margin-bottom: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.savings-table th,
+.savings-table td {
+  text-align: left;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.savings-table tr:last-child td {
+  border-bottom: none;
+}
+
+.savings-table th {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.savings-panel .muted {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 4px 0;
+}
+
 /* Metrics */
 .metrics-grid {
   display: grid;
@@ -502,4 +558,89 @@ section .section-sub {
 
 .muted {
   color: var(--muted);
+}
+
+/* Encrypted vault */
+.vault-panel {
+  margin: 24px 0;
+  padding: 14px 16px;
+  background: var(--accent-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.vault-panel h2 {
+  margin-top: 0;
+}
+
+.vault-panel .muted {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 4px 0;
+}
+
+.vault-setup {
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 13px;
+}
+
+.vault-setup p {
+  margin: 6px 0;
+}
+
+.vault-setup ul {
+  margin: 6px 0;
+  padding-left: 20px;
+}
+
+.vault-admin-row {
+  display: flex;
+  gap: 8px;
+  margin: 10px 0;
+  flex-wrap: wrap;
+}
+
+.vault-admin-row input[type="password"] {
+  flex: 1;
+  min-width: 240px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.vault-table {
+  margin-top: 10px;
+}
+
+.vault-table code {
+  font-size: 12px;
+}
+
+.revealed-key {
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 10px 0;
+  word-break: break-all;
+}
+
+.revealed-key p {
+  margin: 4px 0;
+}
+
+.revealed-key code {
+  display: block;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 13px;
+  margin: 6px 0;
 }
