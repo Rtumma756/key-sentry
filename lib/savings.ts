@@ -45,6 +45,23 @@ export const SAVINGS_DISCLAIMER =
 export const SAVINGS_METHODOLOGY_NOTE =
   "Estimate based on public pricing and documented abuse costs — not a verified loss.";
 
+// Confidence split (2026-11-19): "real-looking" only proves a key matches
+// a documented format and sits in real code/config context — it does NOT
+// prove the key is live or has paid billing, because no found key is ever
+// tested against a provider. So every estimate is reported twice:
+// "Potential (candidate) savings" (all findings, unconfirmed) and
+// "Owner-verified savings" (same model, only keys the owner confirmed
+// live and theirs). Until any key is verified the verified side is $0.
+export const OWNER_VERIFIED_NOTE =
+  "Owner-verified savings count only keys the owner confirmed live and " +
+  "theirs, then marked verified. Unconfirmed candidates never count here.";
+
+export const VERIFIED_NOT_AVAILABLE_NOTE =
+  "Not yet available — the vault isn't deployed yet. Once it is, keys the " +
+  "owner stores in the vault (after confirming they are live and theirs) " +
+  "count here as owner-verified savings. Until then this side stays $0; " +
+  "the candidate figures above are unconfirmed estimates, not verified losses.";
+
 interface ProviderPricing {
   model: string;
   inputPer1m: number;
@@ -169,17 +186,37 @@ export interface SavingsEstimate {
   byProvider: Record<string, number>;
   scenarios: Record<"conservative" | "expected" | "worstCase", ScenarioEstimate>;
   headlineRangeUsd: Record<"conservative" | "expected" | "worstCase", number>;
+  /** Keys the owner confirmed live (via the vault, once it is deployed). */
+  verifiedKeys: number;
+  /** Same model, verified findings only. All $0 until any key is verified. */
+  ownerVerified: {
+    totalKeys: number;
+    byProvider: Record<string, number>;
+    scenarios: Record<"conservative" | "expected" | "worstCase", ScenarioEstimate>;
+    headlineRangeUsd: Record<"conservative" | "expected" | "worstCase", number>;
+  };
+  ownerVerifiedNote: string;
 }
 
-/** Per-provider + total potential-savings ranges for a list of findings. */
-export function estimateSavings(findings: Finding[]): SavingsEstimate {
+type ScenarioMap = Record<
+  "conservative" | "expected" | "worstCase",
+  ScenarioEstimate
+>;
+
+/** The model run over one list of findings (candidate or verified). */
+function estimateFor(findings: Finding[]): {
+  totalKeys: number;
+  byProvider: Record<string, number>;
+  scenarios: ScenarioMap;
+  headlineRangeUsd: Record<"conservative" | "expected" | "worstCase", number>;
+} {
   const counts: Record<string, number> = {};
   for (const f of findings) {
     counts[f.provider] = (counts[f.provider] ?? 0) + 1;
   }
   const totalKeys = findings.length;
 
-  const scenarios = {} as SavingsEstimate["scenarios"];
+  const scenarios = {} as ScenarioMap;
   (Object.keys(SCENARIOS) as Array<keyof typeof SCENARIOS>).forEach((name) => {
     const spec = SCENARIOS[name];
     const byProviderUsd: Record<string, number> = {};
@@ -209,8 +246,6 @@ export function estimateSavings(findings: Finding[]): SavingsEstimate {
   });
 
   return {
-    model: SAVINGS_MODEL_VERSION,
-    disclaimer: SAVINGS_DISCLAIMER,
     totalKeys,
     byProvider: counts,
     scenarios,
@@ -219,6 +254,30 @@ export function estimateSavings(findings: Finding[]): SavingsEstimate {
       expected: scenarios.expected.usageBillSavingsUsd,
       worstCase: scenarios.worstCase.usageBillSavingsUsd,
     },
+  };
+}
+
+/**
+ * Per-provider + total savings ranges for a list of findings, split in two.
+ *
+ * The top-level fields are the CANDIDATE estimate (all findings) — the
+ * same numbers as before this split. `ownerVerified` is the same model
+ * run over `verifiedFindings` only: keys the owner confirmed live and
+ * theirs (via the vault, once it is deployed). With no verified findings
+ * the owner-verified side is all $0.
+ */
+export function estimateSavings(
+  findings: Finding[],
+  verifiedFindings: Finding[] = [],
+): SavingsEstimate {
+  const candidate = estimateFor(findings);
+  return {
+    model: SAVINGS_MODEL_VERSION,
+    disclaimer: SAVINGS_DISCLAIMER,
+    ...candidate,
+    verifiedKeys: verifiedFindings.length,
+    ownerVerified: estimateFor(verifiedFindings),
+    ownerVerifiedNote: OWNER_VERIFIED_NOTE,
   };
 }
 
