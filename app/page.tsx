@@ -5,6 +5,12 @@ import { DEMO_CODE, DEMO_EXPECTED_FINDINGS } from "@/lib/demo";
 import { fetchRepoFiles, parseRepoUrl } from "@/lib/github";
 import { buildMarkdownReport, remediationSteps } from "@/lib/remediation";
 import { scanSources, type Finding, type ScanResult } from "@/lib/scan";
+import {
+  estimateSavings,
+  formatUsd,
+  INCIDENT_RESPONSE_PER_KEY_USD,
+  SAVINGS_METHODOLOGY_NOTE,
+} from "@/lib/savings";
 
 const FEEDBACK_URL = "https://github.com/Rtumma756/key-sentry/issues";
 
@@ -32,6 +38,77 @@ function ProviderBreakdown({ data }: { data: Record<string, number> }) {
       <strong>By provider: </strong>
       {entries.map(([k, v]) => `${k} (${v})`).join(" · ")}
     </p>
+  );
+}
+
+function SavingsPanel({ findings }: { findings: Finding[] }) {
+  const savings = useMemo(() => estimateSavings(findings), [findings]);
+  const h = savings.headlineRangeUsd;
+  const expected = savings.scenarios.expected;
+  const byProvider = Object.entries(expected.byProviderUsd).sort(
+    (a, b) => b[1] - a[1],
+  );
+  return (
+    <section className="savings-panel" aria-label="Potential savings">
+      <h2>Potential savings</h2>
+      <p className="savings-range">
+        <strong>
+          {formatUsd(h.conservative)} conservative –{" "}
+          {formatUsd(h.expected)} expected – {formatUsd(h.worstCase)}{" "}
+          worst-case
+        </strong>
+      </p>
+      <p className="savings-sub">
+        Estimated usage-bill savings from finding these{" "}
+        {savings.totalKeys} key(s) before they could be abused. Expected
+        case: 25% of keys abused at 25M tokens/day for 30 days undetected
+        ({formatUsd(expected.perKeyUsd)} per key), plus{" "}
+        {formatUsd(expected.incidentResponseSavingsUsd)} of incident-response
+        cost at an assumed ${INCIDENT_RESPONSE_PER_KEY_USD.toLocaleString()}{" "}
+        per abused key.
+      </p>
+      <table className="savings-table">
+        <thead>
+          <tr>
+            <th>Scenario</th>
+            <th>Keys abused</th>
+            <th>Throughput</th>
+            <th>Window</th>
+            <th>Usage-bill savings</th>
+          </tr>
+        </thead>
+        <tbody>
+          {(
+            [
+              ["Conservative", savings.scenarios.conservative],
+              ["Expected", savings.scenarios.expected],
+              ["Worst-case", savings.scenarios.worstCase],
+            ] as const
+          ).map(([label, s]) => (
+            <tr key={label}>
+              <td>{label}</td>
+              <td>{Math.round(s.pAbuse * 100)}%</td>
+              <td>{s.throughputTokensPerDay / 1_000_000}M tok/day</td>
+              <td>{s.windowDays} days</td>
+              <td>{formatUsd(s.usageBillSavingsUsd)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="breakdown">
+        <strong>Expected case, by provider: </strong>
+        {byProvider
+          .map(([p, v]) => `${p} (${formatUsd(v)})`)
+          .join(" · ")}
+      </p>
+      <p className="muted">{SAVINGS_METHODOLOGY_NOTE}</p>
+      <p className="muted">
+        Assumes paid billing on the keys; free-tier keys would cost far less.
+        Blended rates from public list prices (Nov 2026); providers without
+        a researched price use a generic rate. Full model and sources: the
+        CLI scanner&apos;s results/DISCOVERY_INTELLIGENCE.md.
+      </p>
+    </section>
   );
 }
 
@@ -282,6 +359,7 @@ export default function Home() {
             </div>
           ) : (
             <>
+              <SavingsPanel findings={findings} />
               <div className="action-row" style={{ marginBottom: 12 }}>
                 <button
                   type="button"
