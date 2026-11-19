@@ -10,7 +10,9 @@ import {
   estimateSavings,
   formatUsd,
   INCIDENT_RESPONSE_PER_KEY_USD,
+  ownerVerifiedLiveNote,
   SAVINGS_METHODOLOGY_NOTE,
+  vaultEntriesToVerifiedFindings,
   VERIFIED_NOT_AVAILABLE_NOTE,
 } from "@/lib/savings";
 
@@ -43,12 +45,53 @@ function ProviderBreakdown({ data }: { data: Record<string, number> }) {
   );
 }
 
-function SavingsPanel({ findings }: { findings: Finding[] }) {
-  // Wiring point: once the vault is deployed, pass the vaulted findings
-  // (GET /api/vault, provider + masked only) as the second argument so
-  // the owner-verified side counts keys the owner confirmed live.
-  // Until then verifiedFindings defaults to [] and that side is $0.
-  const savings = useMemo(() => estimateSavings(findings), [findings]);
+function SavingsPanel({
+  findings,
+  vaultSignal,
+}: {
+  findings: Finding[];
+  vaultSignal: number;
+}) {
+  // Owner-verified side, wired to the live vault: fetch its masked
+  // entries and count active, non-demo ones as verified. Only the
+  // provider is used by the model — no key material ever enters this
+  // path. Refreshes on page load and whenever a store/rotate/delete
+  // changes the vault (vaultSignal). If the vault is unreachable the
+  // verified side stays $0 with the not-available note.
+  const [verifiedFindings, setVerifiedFindings] = useState<Finding[]>([]);
+  const [vaultAvailable, setVaultAvailable] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/vault");
+        if (cancelled) return;
+        if (!res.ok) {
+          setVaultAvailable(false);
+          setVerifiedFindings([]);
+          return;
+        }
+        const data = await res.json();
+        setVaultAvailable(true);
+        setVerifiedFindings(
+          vaultEntriesToVerifiedFindings(data.entries ?? []),
+        );
+      } catch {
+        if (cancelled) return;
+        setVaultAvailable(false);
+        setVerifiedFindings([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [vaultSignal]);
+
+  const savings = useMemo(
+    () => estimateSavings(findings, verifiedFindings),
+    [findings, verifiedFindings],
+  );
   const h = savings.headlineRangeUsd;
   const vh = savings.ownerVerified.headlineRangeUsd;
   const expected = savings.scenarios.expected;
@@ -123,7 +166,13 @@ function SavingsPanel({ findings }: { findings: Finding[] }) {
         </strong>{" "}
         ({savings.verifiedKeys} key(s) verified)
       </p>
-      <p className="muted">{VERIFIED_NOT_AVAILABLE_NOTE}</p>
+      {vaultAvailable !== null && (
+        <p className="muted">
+          {vaultAvailable
+            ? ownerVerifiedLiveNote(savings.verifiedKeys)
+            : VERIFIED_NOT_AVAILABLE_NOTE}
+        </p>
+      )}
       <p className="muted">{SAVINGS_METHODOLOGY_NOTE}</p>
       <p className="muted">
         Assumes paid billing on the keys; free-tier keys would cost far less.
@@ -166,7 +215,13 @@ interface VaultSetup {
   reason: string | null;
 }
 
-function VaultSection({ refreshSignal }: { refreshSignal: number }) {
+function VaultSection({
+  refreshSignal,
+  onVaultChange,
+}: {
+  refreshSignal: number;
+  onVaultChange?: () => void;
+}) {
   const [entries, setEntries] = useState<VaultEntry[] | null>(null);
   const [audit, setAudit] = useState<VaultAuditEntry[]>([]);
   const [setup, setSetup] = useState<VaultSetup | null>(null);
@@ -254,6 +309,43 @@ function VaultSection({ refreshSignal }: { refreshSignal: number }) {
       } else {
         setRevealed(null);
         loadVault();
+        onVaultChange?.();
+      }
+    } catch {
+      setError("Could not reach the vault API.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleDelete(entry: VaultEntry) {
+    if (!adminPass) {
+      setError("Enter the admin passphrase to remove a key.");
+      return;
+    }
+    if (
+      !window.confirm(
+        `Permanently remove the ${entry.provider} key ${entry.masked} from the vault? ` +
+          "This deletes the encrypted key and cannot be undone.",
+      )
+    ) {
+      return;
+    }
+    setBusy(`delete:${entry.id}`);
+    setError(null);
+    try {
+      const res = await fetch("/api/vault/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: entry.id, adminPass }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? "Remove failed.");
+      } else {
+        if (revealed?.id === entry.id) setRevealed(null);
+        loadVault();
+        onVaultChange?.();
       }
     } catch {
       setError("Could not reach the vault API.");
@@ -276,7 +368,8 @@ function VaultSection({ refreshSignal }: { refreshSignal: number }) {
         Scope: vault only keys from scans you ran yourself (pasted code, or
         your own repo) — so you can rotate them. Never vault keys found in
         other people&apos;s public code. Demo TESTFAKE keys are fine to
-        vault for a trial run.
+        vault for a trial run; they never count toward owner-verified
+        savings, and can be removed with the Remove button (admin only).
       </p>
 
       {loading ? (
@@ -313,7 +406,7 @@ function VaultSection({ refreshSignal }: { refreshSignal: number }) {
               type="password"
               value={adminPass}
               onChange={(e) => setAdminPass(e.target.value)}
-              placeholder="Admin passphrase (to reveal or rotate)"
+              placeholder="Admin passphrase (to reveal, rotate, or remove)"
               aria-label="Admin passphrase"
               spellCheck={false}
               autoComplete="off"
@@ -398,7 +491,16 @@ function VaultSection({ refreshSignal }: { refreshSignal: number }) {
                         >
                           {busy === `rotate:${e.id}` ? "…" : "Mark rotated"}
                         </button>
-                      )}
+                      )}{" "}
+                      <button
+                        type="button"
+                        className="btn-small"
+                        disabled={busy !== null}
+                        onClick={() => handleDelete(e)}
+                        title="Permanently remove this entry from the vault (admin only, audit-logged)."
+                      >
+                        {busy === `delete:${e.id}` ? "…" : "Remove"}
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -762,7 +864,7 @@ export default function Home() {
             </div>
           ) : (
             <>
-              <SavingsPanel findings={findings} />
+              <SavingsPanel findings={findings} vaultSignal={vaultSignal} />
               <div className="action-row" style={{ marginBottom: 12 }}>
                 <button
                   type="button"
@@ -888,7 +990,10 @@ export default function Home() {
         {repoError && <p className="error-banner">{repoError}</p>}
       </section>
 
-      <VaultSection refreshSignal={vaultSignal} />
+      <VaultSection
+        refreshSignal={vaultSignal}
+        onVaultChange={() => setVaultSignal((n) => n + 1)}
+      />
 
       <div className="info-grid">
         <section aria-label="How it works">
