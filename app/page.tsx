@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { DEMO_CODE, DEMO_EXPECTED_FINDINGS } from "@/lib/demo";
 import { fetchRepoFiles, parseRepoUrl } from "@/lib/github";
 import { buildMarkdownReport, remediationSteps } from "@/lib/remediation";
 import { scanSources, type Finding, type ScanResult } from "@/lib/scan";
+import type { MaskMode } from "@/lib/detectors";
 import {
   estimateSavings,
   formatUsd,
@@ -112,7 +113,316 @@ function SavingsPanel({ findings }: { findings: Finding[] }) {
   );
 }
 
-function FindingCard({ finding }: { finding: Finding }) {
+interface VaultEntry {
+  id: string;
+  provider: string;
+  masked: string;
+  fingerprint: string;
+  source: string;
+  file: string;
+  line: number;
+  severity: string;
+  status: "active" | "rotated" | "expired";
+  storedAt: string;
+  rotatedAt: string | null;
+}
+
+interface VaultAuditEntry {
+  id: number;
+  entryId: string | null;
+  action: string;
+  actor: string;
+  detail: string;
+  createdAt: string;
+}
+
+interface VaultSetup {
+  configured: boolean;
+  db: boolean;
+  encryptionKey: boolean;
+  adminPass: boolean;
+  reason: string | null;
+}
+
+function VaultSection({ refreshSignal }: { refreshSignal: number }) {
+  const [entries, setEntries] = useState<VaultEntry[] | null>(null);
+  const [audit, setAudit] = useState<VaultAuditEntry[]>([]);
+  const [setup, setSetup] = useState<VaultSetup | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [adminPass, setAdminPass] = useState("");
+  const [revealed, setRevealed] = useState<{ id: string; value: string } | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function loadVault() {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/vault");
+      const data = await res.json();
+      if (!res.ok) {
+        setSetup(data.setup ?? null);
+        setEntries(null);
+        setError(data.error ?? "Vault unavailable.");
+      } else {
+        setSetup(null);
+        setEntries(data.entries ?? []);
+      }
+      const auditRes = await fetch("/api/vault/audit");
+      if (auditRes.ok) {
+        const auditData = await auditRes.json();
+        setAudit(auditData.entries ?? []);
+      }
+    } catch {
+      setError("Could not reach the vault API.");
+      setEntries(null);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadVault();
+  }, [refreshSignal]);
+
+  async function handleReveal(entry: VaultEntry) {
+    if (!adminPass) {
+      setError("Enter the admin passphrase to reveal a key.");
+      return;
+    }
+    setBusy(`reveal:${entry.id}`);
+    setError(null);
+    try {
+      const res = await fetch("/api/vault/reveal", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: entry.id, adminPass }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? "Reveal failed.");
+        setRevealed(null);
+      } else {
+        setRevealed({ id: entry.id, value: data.value });
+        loadVault();
+      }
+    } catch {
+      setError("Could not reach the vault API.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleRotate(entry: VaultEntry) {
+    if (!adminPass) {
+      setError("Enter the admin passphrase to mark a key rotated.");
+      return;
+    }
+    setBusy(`rotate:${entry.id}`);
+    setError(null);
+    try {
+      const res = await fetch("/api/vault/rotate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: entry.id, adminPass, status: "rotated" }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? "Rotate failed.");
+      } else {
+        setRevealed(null);
+        loadVault();
+      }
+    } catch {
+      setError("Could not reach the vault API.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <section className="vault-panel" aria-label="Encrypted vault">
+      <h2>Encrypted vault (admin-only)</h2>
+      <p className="section-sub">
+        The vault holds a finding&apos;s <strong>unmasked</strong> key,
+        encrypted at rest (AES-256-GCM, Vercel Postgres). Everything else —
+        this page, reports, the audit log — shows masked keys only. Only an
+        admin holding the passphrase can reveal a key, and every reveal is
+        audit-logged.
+      </p>
+      <p className="muted">
+        Scope: vault only keys from scans you ran yourself (pasted code, or
+        your own repo) — so you can rotate them. Never vault keys found in
+        other people&apos;s public code. Demo TESTFAKE keys are fine to
+        vault for a trial run.
+      </p>
+
+      {loading ? (
+        <p className="progress-note">Loading vault…</p>
+      ) : setup ? (
+        <div className="vault-setup">
+          <p>
+            <strong>Vault is not configured yet.</strong>
+          </p>
+          <p>{setup.reason}</p>
+          <ul>
+            <li>
+              Postgres database: {setup.db ? "connected ✓" : "missing"}
+            </li>
+            <li>
+              VAULT_ENCRYPTION_KEY:{" "}
+              {setup.encryptionKey ? "set ✓" : "missing"}
+            </li>
+            <li>
+              VAULT_ADMIN_PASS: {setup.adminPass ? "set ✓" : "missing"}
+            </li>
+          </ul>
+          <p className="muted">
+            Setup: in Vercel, Storage → Create → Postgres (free tier), then
+            set VAULT_ENCRYPTION_KEY (`openssl rand -base64 32`) and
+            VAULT_ADMIN_PASS in Settings → Environment Variables, and
+            redeploy. Tables are created automatically on first use.
+          </p>
+        </div>
+      ) : (
+        <>
+          <div className="vault-admin-row">
+            <input
+              type="password"
+              value={adminPass}
+              onChange={(e) => setAdminPass(e.target.value)}
+              placeholder="Admin passphrase (to reveal or rotate)"
+              aria-label="Admin passphrase"
+              spellCheck={false}
+              autoComplete="off"
+            />
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={loadVault}
+            >
+              Refresh
+            </button>
+          </div>
+          {error && <p className="error-banner">{error}</p>}
+          {revealed && (
+            <div className="revealed-key">
+              <p>
+                <strong>Revealed key (shown once — copy it, then hide it):</strong>
+              </p>
+              <code>{revealed.value}</code>
+              <div className="action-row">
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => setRevealed(null)}
+                >
+                  Hide
+                </button>
+                <span className="char-count">
+                  Reveal audit-logged. Rotate this key now if it was ever
+                  exposed.
+                </span>
+              </div>
+            </div>
+          )}
+          {entries && entries.length === 0 ? (
+            <p className="muted">
+              Vault is empty. Use “Store in vault” on a finding above — that
+              click is the explicit consent to send that one key to the
+              server vault.
+            </p>
+          ) : (
+            <table className="savings-table vault-table">
+              <thead>
+                <tr>
+                  <th>Provider</th>
+                  <th>Masked key</th>
+                  <th>Source</th>
+                  <th>Stored</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(entries ?? []).map((e) => (
+                  <tr key={e.id}>
+                    <td>{e.provider}</td>
+                    <td>
+                      <code>{e.masked}</code>
+                    </td>
+                    <td>
+                      {e.source}
+                      {e.file ? ` · ${e.file}` : ""}
+                      {e.line ? `:${e.line}` : ""}
+                    </td>
+                    <td>{e.storedAt.slice(0, 19).replace("T", " ")}</td>
+                    <td>{e.status}</td>
+                    <td>
+                      <button
+                        type="button"
+                        className="btn-small"
+                        disabled={busy !== null}
+                        onClick={() => handleReveal(e)}
+                      >
+                        {busy === `reveal:${e.id}` ? "…" : "Reveal"}
+                      </button>{" "}
+                      {e.status === "active" && (
+                        <button
+                          type="button"
+                          className="btn-small"
+                          disabled={busy !== null}
+                          onClick={() => handleRotate(e)}
+                        >
+                          {busy === `rotate:${e.id}` ? "…" : "Mark rotated"}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          <details className="remediation">
+            <summary>
+              Audit trail ({audit.length} entr{audit.length === 1 ? "y" : "ies"}
+              )
+            </summary>
+            {audit.length === 0 ? (
+              <p className="muted">No audit entries yet.</p>
+            ) : (
+              <ol>
+                {audit.map((a) => (
+                  <li key={a.id}>
+                    {a.createdAt.slice(0, 19).replace("T", " ")} —{" "}
+                    <strong>{a.action}</strong> · {a.entryId ?? "—"} ·{" "}
+                    {a.actor} · {a.detail}
+                  </li>
+                ))}
+              </ol>
+            )}
+            <p className="muted">
+              The audit log records who did what and when. Full keys are
+              never written to it.
+            </p>
+          </details>
+        </>
+      )}
+    </section>
+  );
+}
+
+function FindingCard({
+  finding,
+  onStore,
+  stored,
+  storeBusy,
+}: {
+  finding: Finding;
+  onStore?: (f: Finding) => void;
+  stored?: boolean;
+  storeBusy?: boolean;
+}) {
   const steps = remediationSteps(finding);
   return (
     <article className={`finding-card severity-${finding.severity}`}>
@@ -139,6 +449,17 @@ function FindingCard({ finding }: { finding: Finding }) {
           >
             Revoke at {finding.provider}
           </a>
+        )}
+        {onStore && (
+          <button
+            type="button"
+            className="btn-small"
+            disabled={stored || storeBusy}
+            onClick={() => onStore(finding)}
+            title="Sends this one key to the server-side encrypted vault (admin-only reveal). Explicit click only — nothing is stored automatically."
+          >
+            {stored ? "Stored in vault ✓" : storeBusy ? "Storing…" : "Store in vault"}
+          </button>
         )}
       </div>
       <details className="remediation">
@@ -170,6 +491,15 @@ export default function Home() {
   const [repoBusy, setRepoBusy] = useState(false);
   const [repoError, setRepoError] = useState<string | null>(null);
   const [repoProgress, setRepoProgress] = useState<string | null>(null);
+  const [storedIds, setStoredIds] = useState<string[]>([]);
+  const [storeBusyId, setStoreBusyId] = useState<string | null>(null);
+  const [storeNote, setStoreNote] = useState<string | null>(null);
+  const [vaultSignal, setVaultSignal] = useState(0);
+  // Masking mode for displayed keys. Default "prefix4" shows the first 4
+  // chars and hides the rest. "ends" hides the first 5 and last 3 and shows
+  // the middle — that exposes most of a key, so use it only when scanning
+  // your own code, never for keys that belong to someone else.
+  const [maskMode, setMaskMode] = useState<MaskMode>("prefix4");
 
   const findings = result?.findings ?? [];
 
@@ -181,7 +511,7 @@ export default function Home() {
 
   function runScan(text: string, label: string) {
     if (!text.trim()) return;
-    const r = scanSources([{ name: label, text }]);
+    const r = scanSources([{ name: label, text }], maskMode);
     setResult(r);
     setSourceLabel(label);
     setCopied(false);
@@ -200,6 +530,44 @@ export default function Home() {
     setInput("");
     setResult(null);
     setCopied(false);
+  }
+
+  async function handleStoreFinding(finding: Finding) {
+    // Explicit click only: this is the one place a full key leaves the
+    // browser — to the server-side encrypted vault, never automatically.
+    setStoreBusyId(finding.id);
+    setStoreNote(null);
+    try {
+      const res = await fetch("/api/vault", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider: finding.provider,
+          value: finding.value,
+          source: sourceLabel,
+          file: finding.source,
+          line: finding.lineNumber,
+          severity: finding.severity,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setStoreNote(
+          data.error ??
+            "Could not store in vault. See the vault section below.",
+        );
+      } else {
+        setStoredIds((prev) => [...prev, finding.id]);
+        setStoreNote(
+          `Stored ${finding.provider} key ${finding.maskedKey} in the vault.`,
+        );
+        setVaultSignal((n) => n + 1);
+      }
+    } catch {
+      setStoreNote("Could not reach the vault API.");
+    } finally {
+      setStoreBusyId(null);
+    }
   }
 
   async function handleCopyReport() {
@@ -246,6 +614,7 @@ export default function Home() {
       }
       const r = scanSources(
         files.map((f) => ({ name: f.name, text: f.text })),
+        maskMode,
       );
       setResult(r);
       setSourceLabel(`${parsed.owner}/${parsed.repo}`);
@@ -274,8 +643,9 @@ export default function Home() {
         <p className="privacy-note">
           <strong>Privacy:</strong> scanning runs entirely in your browser.
           Pasted code and scanned files never leave your machine — the only
-          network call this app makes is the optional public GitHub repo scan
-          below.
+          network calls this app makes are the optional public GitHub repo
+          scan below, and a finding you explicitly choose to store in the
+          encrypted vault (see below).
         </p>
       </header>
 
@@ -306,6 +676,17 @@ export default function Home() {
           <button type="button" className="btn-secondary" onClick={handleDemo}>
             Try the demo
           </button>
+          <label className="mask-toggle">
+            Masking:
+            <select
+              value={maskMode}
+              onChange={(e) => setMaskMode(e.target.value as MaskMode)}
+              aria-label="Masking mode"
+            >
+              <option value="prefix4">First 4 shown</option>
+              <option value="ends">Hide first 5 + last 3</option>
+            </select>
+          </label>
           <button
             type="button"
             className="btn-secondary"
@@ -373,8 +754,15 @@ export default function Home() {
                   never shown
                 </span>
               </div>
+              {storeNote && <p className="progress-note">{storeNote}</p>}
               {findings.map((f) => (
-                <FindingCard key={f.id} finding={f} />
+                <FindingCard
+                  key={f.id}
+                  finding={f}
+                  onStore={handleStoreFinding}
+                  stored={storedIds.includes(f.id)}
+                  storeBusy={storeBusyId === f.id}
+                />
               ))}
             </>
           )}
@@ -478,6 +866,8 @@ export default function Home() {
         {repoError && <p className="error-banner">{repoError}</p>}
       </section>
 
+      <VaultSection refreshSignal={vaultSignal} />
+
       <div className="info-grid">
         <section aria-label="How it works">
           <h2>How it works</h2>
@@ -538,8 +928,9 @@ export default function Home() {
 
       <footer className="app-footer">
         KeySentry prototype — detectors ported from the CLI scanner
-        (15 detectors, 13 providers). No accounts, no server, no data leaves
-        your browser except the optional public GitHub repo fetch.
+        (15 detectors, 13 providers). Scanning is client-side; data leaves
+        your browser only for the optional public GitHub repo fetch, or a
+        finding you explicitly store in the encrypted vault.
       </footer>
     </div>
   );
