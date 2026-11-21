@@ -38,6 +38,8 @@ import { NextResponse } from "next/server";
 import { sha256Hex, VaultNotConfigured } from "@/lib/vault-crypto";
 import { listMatches, recordMatch } from "@/lib/fingerprints-db";
 import { scanText } from "@/lib/scan";
+import { featureAllowed, upgradePrompt } from "@/lib/plans";
+import { resolveWorkspacePlanId } from "@/lib/plan-enforcement";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -140,6 +142,27 @@ export async function GET(req: Request) {
       },
       { status: 401 },
     );
+  }
+
+  // Free-tier gate (FREE-TIER-CAPS.md): auto-monitoring is not on
+  // Free — fingerprint checks there are manual only (CLI `check`).
+  // The sweep skips the run entirely and says what unlocks it, with
+  // the standard zeroed summary shape so schedulers keep parsing it.
+  const planId = await resolveWorkspacePlanId("default");
+  if (!featureAllowed(planId, "fingerprint_monitoring")) {
+    return NextResponse.json({
+      checked: 0,
+      stillPresent: 0,
+      gone: 0,
+      errors: 0,
+      skipped: 0,
+      details: [],
+      skippedFree: true,
+      reason:
+        "Auto-monitoring (the daily sweep) is not included in the " +
+        "Free plan — fingerprint checks on Free are manual only.",
+      upgrade: upgradePrompt(planId, "fingerprint_monitoring"),
+    });
   }
 
   const startedAt = Date.now();

@@ -1,6 +1,8 @@
 "use client";
 
 import { Fragment, useEffect, useMemo, useState } from "react";
+import UpgradeBanner from "./components/UpgradeBanner";
+import CounterBadge from "./components/CounterBadge";
 import { DEMO_CODE, DEMO_EXPECTED_FINDINGS } from "@/lib/demo";
 import { fetchRepoFiles, parseRepoUrl } from "@/lib/github";
 import { buildMarkdownReport, remediationSteps } from "@/lib/remediation";
@@ -1309,6 +1311,55 @@ export default function Home() {
   // the middle — that exposes most of a key, so use it only when scanning
   // your own code, never for keys that belong to someone else.
   const [maskMode, setMaskMode] = useState<MaskMode>("prefix4");
+  // Workspace plan for the upgrade banner (Free -> show it). Fetched
+  // client-side; if the fetch fails (billing unconfigured, offline),
+  // the banner stays hidden — the dashboard must never break because
+  // billing is unconfigured.
+  const [workspacePlan, setWorkspacePlan] = useState<string | null>(null);
+  // Today's free-tier daily counters for the banner row (vibe scans,
+  // audits, dashboard saves). Same best-effort fetch as the plan:
+  // when it fails the badges stay hidden, never an error.
+  const [dayCounters, setDayCounters] = useState<{
+    planName: string;
+    vibe_scans: { used: number; limit: number | null };
+    audits: { used: number; limit: number | null };
+    dashboard_saves: { used: number; limit: number | null };
+  } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/billing/plan");
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled && typeof data.plan === "string") {
+          setWorkspacePlan(data.plan);
+        }
+      } catch {
+        // Billing unconfigured or unreachable: no banner, no error.
+      }
+      try {
+        const res = await fetch("/api/usage/counters");
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled && data.counters) {
+          setDayCounters({
+            planName:
+              typeof data.planName === "string" ? data.planName : "Free",
+            vibe_scans: data.counters.vibe_scans,
+            audits: data.counters.audits,
+            dashboard_saves: data.counters.dashboard_saves,
+          });
+        }
+      } catch {
+        // Counters unavailable: no badges, no error.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const findings = result?.findings ?? [];
 
@@ -1458,6 +1509,44 @@ export default function Home() {
           matches panels, which send only one-way hashes, never keys.
         </p>
       </header>
+
+      {workspacePlan === "free" && (
+        <UpgradeBanner plan="free" feature="fingerprint_monitoring" />
+      )}
+
+      {dayCounters && (
+        <div
+          style={{
+            display: "flex",
+            gap: "0.5rem",
+            flexWrap: "wrap",
+            margin: "0 0 1rem 0",
+          }}
+          aria-label="Today's free usage"
+        >
+          <CounterBadge
+            used={dayCounters.vibe_scans.used}
+            limit={dayCounters.vibe_scans.limit}
+            label="scans"
+            planName={dayCounters.planName}
+            suffix="Resets at midnight UTC"
+          />
+          <CounterBadge
+            used={dayCounters.audits.used}
+            limit={dayCounters.audits.limit}
+            label="audits"
+            planName={dayCounters.planName}
+            suffix="Resets at midnight UTC"
+          />
+          <CounterBadge
+            used={dayCounters.dashboard_saves.used}
+            limit={dayCounters.dashboard_saves.limit}
+            label="dashboard saves"
+            planName={dayCounters.planName}
+            suffix="Resets at midnight UTC"
+          />
+        </div>
+      )}
 
       <section aria-label="Paste code to scan">
         <h2>Scan pasted code</h2>

@@ -21,6 +21,7 @@
 
 import { sql } from "@vercel/postgres";
 import { requireDbConfigured } from "./vault-db";
+import { getClientIp } from "./rate-limit";
 
 export {
   DEFAULT_MAX_FINGERPRINTS_PER_DAY,
@@ -30,12 +31,31 @@ export {
   secondsUntilMidnightUtc,
   usageDay,
   usageLimitResponse,
+  // Free-tier caps (FREE-TIER-CAPS.md): pure helpers, re-exported so
+  // routes import everything caps-related from this one module.
+  hashClientIp,
+  resetsAtUtc,
+  memoryDailyCounters,
+  capHitResponse,
+  type CapHitUpgrade,
+  MemoryDailyCounters,
 } from "./usage-policy";
-import { usageDay } from "./usage-policy";
+import {
+  hashClientIp,
+  memoryDailyCounters,
+  usageDay,
+} from "./usage-policy";
 
 /** Counter keys used in usage_counters. */
 export const USAGE_KEY_FINGERPRINTS_ADDED = "fingerprints:added";
 export const USAGE_KEY_MATCHES_RECORDED = "matches:recorded";
+/** Free-tier daily caps (FREE-TIER-CAPS.md). The full counter key is
+ * `<key>:<scope>` where scope is `ip:<sha256-16 of the client IP>`
+ * for anonymous users (a raw IP is never stored) — see
+ * scopeKeyForRequest. */
+export const USAGE_KEY_VIBE_SCANS = "vibe-scans";
+export const USAGE_KEY_DASHBOARD_SAVES = "dashboard-saves";
+export const USAGE_KEY_AUDITS = "audits";
 
 export async function ensureUsageTables(): Promise<void> {
   requireDbConfigured();
@@ -93,4 +113,53 @@ export async function recordUsage(key: string): Promise<number> {
       DO UPDATE SET count = usage_counters.count + 1
     RETURNING count`;
   return Number(rows[0].count ?? 0);
+}
+
+// ---------------------------------------------------------------------------
+// Free-tier daily counters (FREE-TIER-CAPS.md).
+//
+// Same usage_counters table, keyed `<resource>:<scope>` with the UTC
+// day as the row's day column — a new day is a new row, so the
+// midnight-UTC reset is automatic. When no database is configured
+// (or it is unreachable) the counters fall back to the process-local
+// in-memory store: the free layer keeps working, and the cap still
+// applies per instance. Never throws.
+// ---------------------------------------------------------------------------
+
+/** Anonymous-cap scope for a request: `ip:<sha256-16 of the client
+ * IP>`. The hash — never the raw IP — is what lands in the counter
+ * key, so no request can be traced back to an address from storage. */
+export function scopeKeyForRequest(req: Request): string {
+  return `ip:${hashClientIp(getClientIp(req))}`;
+}
+
+/** Today's count for a daily-cap `key` (DB first, memory fallback). */
+export async function getDailyCount(key: string): Promise<number> {
+  try {
+    return await getUsageCount(key);
+  } catch {
+    return memoryDailyCounters.get(key);
+  }
+}
+
+/** Record one use of a daily-cap `key` today (DB first, memory
+ * fallback). Returns the new count. Call only after the guarded
+ * operation succeeded. */
+export async function recordDailyCount(key: string): Promise<number> {
+  try {
+    return await recordUsage(key);
+  } catch {
+    return memoryDailyCounters.increment(key);
+  }
+}
+
+/** Today's counts for several daily-cap keys at once. */
+export async function getDailyCounts(
+  keys: string[],
+): Promise<Record<string, number>> {
+  const out: Record<string, number> = {};
+  for (const key of keys) {
+    out[key] = await getDailyCount(key);
+  }
+  return out;
 }

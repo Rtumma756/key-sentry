@@ -1,6 +1,7 @@
 // Fingerprint watch list API.
 // GET    /api/fingerprints            -> active watched fingerprints (no passphrase: hashes only, safe to list)
-// POST   /api/fingerprints            -> add { fingerprint, provider, label, adminPass } (admin only)
+// POST   /api/fingerprints            -> add { fingerprint, provider, label, agent?, adminPass } (admin only)
+//                                      agent is an optional Pillar 1 tag naming the agent holding the credential
 // DELETE /api/fingerprints            -> remove { fingerprint, adminPass } (admin only, soft delete)
 // Fingerprints are SHA-256 first-16-hex of a key — a one-way hash, never
 // a raw key. The admin gate reuses verifyAdminPass (VAULT_ADMIN_PASS),
@@ -71,6 +72,16 @@ export async function POST(req: Request) {
     );
     const provider = typeof body?.provider === "string" ? body.provider : "";
     const label = typeof body?.label === "string" ? body.label : "";
+    // Optional agent tag (Pillar 1): which agent holds this credential.
+    // Backward compatible — when no label is given, the agent name is
+    // stored as the label; otherwise the label wins.
+    const agent = typeof body?.agent === "string" ? body.agent.trim() : "";
+    if (agent.length > 100) {
+      return NextResponse.json(
+        { error: "Agent tag must be at most 100 characters." },
+        { status: 400 },
+      );
+    }
     const adminPass = typeof body?.adminPass === "string" ? body.adminPass : "";
     if (!fingerprint || !provider) {
       return NextResponse.json(
@@ -110,7 +121,7 @@ export async function POST(req: Request) {
         usage.count,
       );
     }
-    const row = await addFingerprint(fingerprint, provider, label);
+    const row = await addFingerprint(fingerprint, provider, label || agent);
     if (!row) {
       return NextResponse.json(
         { error: "Could not add fingerprint." },

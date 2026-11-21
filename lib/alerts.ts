@@ -9,6 +9,11 @@
 // only the fingerprint (a one-way hash), the provider, and where it was
 // seen — never a raw or masked key.
 //
+// Free-tier gate (FREE-TIER-CAPS.md): email/Slack alerts are NOT on
+// Free — any alert is suppressed and recorded as a would-have-alerted
+// note (function log) with the upgrade prompt, never sent. Match
+// recording itself is unaffected.
+//
 // Alert delivery must never break match recording: sendMatchAlert swallows
 // transport errors (logs them) and the caller proceeds regardless.
 // It returns true when EITHER channel accepted (webhook 2xx or email
@@ -16,6 +21,8 @@
 
 import type { FingerprintMatchRow } from "./fingerprints-db";
 import { sendMatchEmail } from "./email";
+import { featureAllowed, upgradePrompt } from "./plans";
+import { resolveWorkspacePlanId } from "./plan-enforcement";
 
 export function alertWebhookUrl(): string | null {
   const url = process.env.KEYSENTRY_ALERT_WEBHOOK;
@@ -39,10 +46,34 @@ function alertText(match: FingerprintMatchRow): string {
  * email. Returns true when either channel accepted (webhook 2xx, or the
  * email transport accepted), false when nothing is configured or every
  * configured channel failed. Never throws.
+ *
+ * `plan` is the workspace's plan id; when omitted it is resolved from
+ * the workspace plan store (Free when unknown — the free-never-
+ * locked-out default). On Free the alert is suppressed, not sent: a
+ * would-have-alerted note is logged with the upgrade prompt, and the
+ * function returns false (the caller reports alerted=false).
  */
 export async function sendMatchAlert(
   match: FingerprintMatchRow,
+  plan?: string,
 ): Promise<boolean> {
+  const planId = plan ?? (await resolveWorkspacePlanId("default"));
+  if (
+    !featureAllowed(planId, "email_alerts") &&
+    !featureAllowed(planId, "slack_alerts")
+  ) {
+    const prompt = upgradePrompt(planId, "email_alerts");
+    console.info(
+      `KeySentry match alert suppressed (would-have-alerted, ` +
+        `${planId} plan): fingerprint ${match.fingerprint} ` +
+        `(${match.provider || "unknown provider"}) seen again` +
+        (match.repo || match.file
+          ? ` in ${[match.repo, match.file].filter(Boolean).join(" · ")}`
+          : "") +
+        `. ${prompt?.message ?? ""}`,
+    );
+    return false;
+  }
   const webhookOk = await sendWebhookAlert(match);
   // Email is best-effort too and never throws (see lib/email.ts).
   const emailOk = await sendMatchEmail(match);
