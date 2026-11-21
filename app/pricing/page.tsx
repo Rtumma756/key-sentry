@@ -276,7 +276,7 @@ export default function PricingPage() {
   return (
     <div className="app">
       <p style={{ margin: "0 0 1rem 0" }}>
-        <a href="/">← Back to dashboard</a>
+        <a href="/app">← Back to scanner</a>
       </p>
       <h1 style={{ margin: "0 0 0.5rem 0" }}>Plans &amp; pricing</h1>
       <p style={{ margin: "0 0 0.5rem 0", color: "var(--muted)" }}>
