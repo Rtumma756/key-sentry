@@ -1496,6 +1496,9 @@ export default function Home() {
         <div className="brand-row">
           <h1>KeySentry</h1>
           <span className="client-badge">100% client-side</span>
+          <a href="/pricing" style={{ marginLeft: "auto" }}>
+            Pricing
+          </a>
         </div>
         <p className="tagline">
           Paste code, find leaked AI API keys, fix them.
