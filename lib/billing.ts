@@ -124,6 +124,59 @@ export function billingNotConnectedResponse(): Response {
   );
 }
 
+/** Plain-language message for a failed checkout POST, for the
+ * pricing page to show the user — never raw JSON, never a stack
+ * trace. `status` is the HTTP status of the checkout response (0
+ * when the request never reached the server); `data` is the parsed
+ * JSON body, if any. Every branch says no charge was made, because
+ * a failed session creation never charges anyone. */
+export function friendlyCheckoutError(
+  status: number,
+  data: unknown,
+): string {
+  if (status === 0) {
+    return (
+      "Couldn't reach the checkout service. Check your connection " +
+      "and try again — no charge was made."
+    );
+  }
+  const body =
+    data !== null && typeof data === "object"
+      ? (data as { error?: unknown; message?: unknown })
+      : {};
+  if (body.error === "billing_not_connected") {
+    return (
+      "Billing isn't connected yet, so checkout is unavailable. " +
+      "The free plan keeps working — no charge was made."
+    );
+  }
+  if (body.error === "stripe_error") {
+    const stripeMessage =
+      typeof body.message === "string" ? body.message : "";
+    if (stripeMessage.includes("No valid payment method types")) {
+      return (
+        "Checkout isn't available yet — the Stripe account still " +
+        "needs payment methods enabled. The account owner needs to " +
+        "finish Stripe onboarding first. No charge was made."
+      );
+    }
+    if (stripeMessage) {
+      return `Stripe couldn't start checkout: ${stripeMessage} No charge was made.`;
+    }
+    return (
+      "Stripe couldn't start checkout. Please try again — no charge " +
+      "was made."
+    );
+  }
+  if (status >= 500) {
+    return (
+      "The checkout service had a problem. Please try again in a " +
+      "moment — no charge was made."
+    );
+  }
+  return "Checkout couldn't start. Please try again — no charge was made.";
+}
+
 export interface CheckoutPayload {
   mode: "subscription";
   line_items: [{ price: string; quantity: 1 }];

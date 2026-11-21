@@ -133,6 +133,12 @@ export function featureAllowed(
   return (getPlan(plan).features ?? []).includes(feature);
 }
 
+/** Human-readable label for a feature id (from plans.json). Unknown
+ * ids fall back to the id itself — never a blank label. */
+export function featureLabel(feature: string): string {
+  return PLANS.features[feature]?.label ?? feature;
+}
+
 /** First tier above `plan` (in tier order) that allows `feature`. */
 export function nextTierForFeature(
   plan: string | null | undefined,

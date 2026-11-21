@@ -1,9 +1,9 @@
 // Upgrade banner (dashboard): shown when the workspace is on the
 // Free plan. Names the feature, what the next tier unlocks, and its
-// price. The CTA is a link to the checkout documentation
-// (GET /api/billing/checkout) — NOT a live checkout button while
-// Stripe is unconnected. Copy comes from lib/plans.ts, the same source
-// as the CLI, so the wording matches everywhere.
+// price. The CTA links to the pricing page (/pricing), where each
+// paid tier has a working checkout button. Copy comes from
+// lib/plans.ts, the same source as the CLI, so the wording matches
+// everywhere.
 "use client";
 
 import { getPlan, nextTierForFeature, upgradeMessage } from "@/lib/plans";
@@ -44,7 +44,7 @@ export default function UpgradeBanner({
         {message}
       </p>
       <a
-        href="/api/billing/checkout"
+        href="/pricing"
         style={{ color: "var(--hatch-widget-accent)", whiteSpace: "nowrap" }}
       >
         See upgrade options — {next.name} {next.price_label}

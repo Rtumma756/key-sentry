@@ -10,8 +10,8 @@
 //     api.stripe.com/v1/checkout/sessions and Stripe's response is
 //     returned.
 // GET /api/billing/checkout -> documentation for the checkout flow
-// (what the dashboard UpgradeBanner links to). No live checkout button
-// exists while Stripe is unconnected.
+// (API docs only — the dashboard UpgradeBanner links to /pricing,
+// where each paid tier has a working checkout button).
 
 import { NextResponse } from "next/server";
 import {

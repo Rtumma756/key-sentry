@@ -16,6 +16,7 @@ import {
   dailyCapMessage,
   dailyCapUpgrade,
   featureAllowed,
+  featureLabel,
   formatCounter,
   getAllPlans,
   getPlan,
@@ -326,6 +327,23 @@ check("counter display text matches the CLI wording", () => {
     formatCounter(3, null, "scans", "Maker"),
     "3 scans used today (unlimited on the Maker plan)",
   );
+});
+
+check("featureLabel: human labels for the pricing page", () => {
+  // Labels come from plans.json, so the pricing page never shows a
+  // raw feature id.
+  assert.equal(featureLabel("email_alerts"), "Email alerts");
+  assert.equal(featureLabel("fingerprint_monitoring"), "Fingerprint monitoring");
+  assert.equal(featureLabel("sso"), "SSO");
+  // Every feature id used by any tier has a label.
+  for (const tier of getAllPlans()) {
+    for (const f of tier.features) {
+      assert.notEqual(featureLabel(f), "");
+      assert.doesNotMatch(featureLabel(f), /_/);
+    }
+  }
+  // Unknown ids fall back to the id itself, never blank.
+  assert.equal(featureLabel("bogus_feature"), "bogus_feature");
 });
 
 console.log(`\nplans: ${passed} checks passed`);

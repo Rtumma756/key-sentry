@@ -19,6 +19,7 @@ import {
   BillingNotConfigured,
   buildCheckoutPayload,
   checkoutPayloadToFormBody,
+  friendlyCheckoutError,
   isBillingConfigured,
   isBillingLive,
   isWebhookConfigured,
@@ -220,6 +221,52 @@ await check("GET plan defaults to Free when no row exists", () => {
   const other = defaultWorkspacePlan("acme");
   assert.equal(other.workspaceId, "acme");
   assert.equal(other.plan, "free");
+});
+
+await check("friendlyCheckoutError: plain language, never raw JSON", () => {
+  // The exact Stripe failure seen live Nov 21, 2026: the account has
+  // no payment methods activated for CAD (onboarding incomplete).
+  const noMethods = friendlyCheckoutError(502, {
+    error: "stripe_error",
+    message:
+      "No valid payment method types for this Checkout Session. Please " +
+      "ensure that you have activated payment methods compatible with " +
+      "your chosen currency in your dashboard.",
+  });
+  assert.match(noMethods, /payment methods/);
+  assert.match(noMethods, /Stripe onboarding/);
+  assert.match(noMethods, /No charge was made/);
+  assert.doesNotMatch(noMethods, /[{"]/);
+  // Another Stripe failure keeps Stripe's own sentence, as prose.
+  const otherStripe = friendlyCheckoutError(502, {
+    error: "stripe_error",
+    message: "The price is invalid.",
+  });
+  assert.match(otherStripe, /Stripe couldn't start checkout/);
+  assert.match(otherStripe, /The price is invalid/);
+  assert.match(otherStripe, /No charge was made/);
+  // Billing not connected (503 from the route).
+  assert.match(
+    friendlyCheckoutError(503, {
+      error: "billing_not_connected",
+      message: "set STRIPE_SECRET_KEY …",
+    }),
+    /Billing isn't connected yet/,
+  );
+  // Bad tier (400) and server errors stay generic.
+  assert.match(
+    friendlyCheckoutError(400, { error: "Unknown tier for checkout: x" }),
+    /Checkout couldn't start/,
+  );
+  assert.match(
+    friendlyCheckoutError(500, null),
+    /checkout service had a problem/,
+  );
+  // The request never reaching the server (offline) is its own case.
+  assert.match(
+    friendlyCheckoutError(0, null),
+    /Couldn't reach the checkout service/,
+  );
 });
 
 restoreEnv();
