@@ -104,8 +104,8 @@ export async function POST(req: Request) {
     });
   }
   // Live path — the only place api.stripe.com is ever called.
-  // TODO(next step): verify the redirect URLs and Price IDs in the
-  // Stripe dashboard before enabling this in production.
+  // Automatic tax is on in the payload (Stripe Tax, CA GST/HST
+  // registered Nov 21, 2026); prices are tax-exclusive.
   const res = await fetch(STRIPE_CHECKOUT_SESSIONS_URL, {
     method: "POST",
     headers: {

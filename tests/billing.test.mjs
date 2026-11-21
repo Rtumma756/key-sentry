@@ -102,9 +102,14 @@ await check("checkout payload builder: correct Stripe fields per tier", () => {
     assert.equal(payload.metadata.workspace_id, "ws-1");
     assert.match(payload.success_url, /^https:\/\/example\.test\//);
     assert.match(payload.cancel_url, /^https:\/\/example\.test\//);
+    // Automatic tax: Stripe Tax calculates tax from the buyer's
+    // location at checkout (prices are tax-exclusive; CA GST/HST
+    // registered Nov 21, 2026).
+    assert.deepEqual(payload.automatic_tax, { enabled: true });
     // The wire encoding carries the same fields (bracket notation).
     const form = checkoutPayloadToFormBody(payload);
     assert.equal(form.get("mode"), "subscription");
+    assert.equal(form.get("automatic_tax[enabled]"), "true");
     assert.equal(form.get("line_items[0][price]"), priceId);
     assert.equal(form.get("line_items[0][quantity]"), "1");
     assert.equal(form.get("metadata[tier]"), tier);

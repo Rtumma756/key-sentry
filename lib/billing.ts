@@ -1,14 +1,11 @@
-// Stripe billing stub — NO Stripe SDK, no new dependencies, no real
-// keys anywhere. Only env-var PLACEHOLDER names appear here.
-//
-// State of the world: Stripe is NOT connected. buildCheckoutPayload
-// returns the exact request body that WOULD be POSTed to
-// api.stripe.com/v1/checkout/sessions once STRIPE_SECRET_KEY exists;
-// the checkout route only performs that POST when
-// KEYSENTRY_BILLING_LIVE=1 (default off — dry-run otherwise).
-// verifyWebhookSignature implements Stripe's v1 HMAC-SHA256 scheme
-// with node:crypto so the webhook route can be tested end to end
-// before any Stripe account exists.
+// Stripe billing — CONNECTED Nov 21, 2026 (Atkins international,
+// live mode). Stripe Tax active (head office Suite 3101, 1 Quarrington
+// Lane, North York, ON M3C 0S4; CA GST/HST registered; default tax code
+// txcd_10103001, tax-exclusive prices). buildCheckoutPayload returns
+// the exact request body that IS POSTed to api.stripe.com/v1/checkout
+// /sessions once STRIPE_SECRET_KEY exists and KEYSENTRY_BILLING_LIVE=1;
+// the checkout route only performs that POST when live. verifyWebhook
+// Signature implements Stripe's v1 HMAC-SHA256 scheme with node:crypto.
 //
 // Env vars (names only — values are never logged or stored here):
 //   STRIPE_SECRET_KEY      secret key (sk_...) — enables live checkout
@@ -134,6 +131,10 @@ export interface CheckoutPayload {
   cancel_url: string;
   metadata: { tier: CheckoutTier; workspace_id: string };
   allow_promotion_codes: boolean;
+  /** Stripe Tax: tax is calculated automatically from the buyer's
+   * location at checkout (prices are tax-exclusive). Requires Stripe
+   * Tax active with a CA GST/HST registration — done Nov 21, 2026. */
+  automatic_tax: { enabled: true };
 }
 
 /**
@@ -169,6 +170,7 @@ export function buildCheckoutPayload(
       workspace_id: opts.workspaceId ?? "default",
     },
     allow_promotion_codes: true,
+    automatic_tax: { enabled: true },
   };
 }
 
@@ -186,6 +188,7 @@ export function checkoutPayloadToFormBody(
   body.set("metadata[tier]", payload.metadata.tier);
   body.set("metadata[workspace_id]", payload.metadata.workspace_id);
   body.set("allow_promotion_codes", "true");
+  body.set("automatic_tax[enabled]", "true");
   return body;
 }
 
